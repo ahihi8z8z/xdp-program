@@ -37,6 +37,14 @@ struct knn_entry {
     __u16 distance; /* 0xffff = empty */
 };
 
+struct knn_context {
+    const struct flow_key *target_key; /* pointer (verifier-friendly) */
+    const data_point      *target_dp;  /* pointer (verifier-friendly) */
+    struct knn_entry      *results;    /* array trên stack */
+    int                    processed;  /* đếm phần tử đã duyệt */
+    int                    limit;      /* giới hạn duyệt */
+};
+
 /* kRNN list (giá trị của map xdp_update) */
 struct krnn_entry {
     struct flow_key key;
@@ -45,15 +53,6 @@ struct krnn_entry {
 
 struct krnn_entries {
     struct krnn_entry e[UPDATE_MAX];
-};
-
-/* Contexts cho callback */
-struct knn_context {
-    const struct flow_key *target_key; /* pointer (verifier-friendly) */
-    const data_point      *target_dp;  /* pointer (verifier-friendly) */
-    struct knn_entry      *results;    /* array trên stack */
-    int                    processed;  /* đếm phần tử đã duyệt */
-    int                    limit;      /* giới hạn duyệt */
 };
 
 struct krnn_callback_ctx {

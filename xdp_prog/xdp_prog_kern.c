@@ -95,41 +95,41 @@ static __always_inline int parse_packet_get_data(struct xdp_md *ctx,
 }
 
 /* ========================== CALCULATE LOG2(x) ========================== */
-static __always_inline __u8 ilog2_u64(__u64 x)
-{
-    static const __u8 tbl[16] = {0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4};
-    __u8 r = 0;
+// static __always_inline __u8 ilog2_u64(__u64 x)
+// {
+//     static const __u8 tbl[16] = {0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4};
+//     __u8 r = 0;
 
-    if (x >> 32) {
-        __u32 hi = x >> 32;
-        if (hi >= (1<<16)) { hi >>= 16; r += 16; }
-        if (hi >= (1<<8))  { hi >>= 8;  r += 8; }
-        if (hi >= (1<<4))  { hi >>= 4;  r += 4; }
-        return r + tbl[hi & 0xF];
-    } else {
-        __u32 lo = x & 0xFFFFFFFF;
-        if (lo >= (1<<16)) { lo >>= 16; r += 16; }
-        if (lo >= (1<<8))  { lo >>= 8;  r += 8; }
-        if (lo >= (1<<4))  { lo >>= 4;  r += 4; }
-        return r + tbl[lo & 0xF];
-    }
-}
+//     if (x >> 32) {
+//         __u32 hi = x >> 32;
+//         if (hi >= (1<<16)) { hi >>= 16; r += 16; }
+//         if (hi >= (1<<8))  { hi >>= 8;  r += 8; }
+//         if (hi >= (1<<4))  { hi >>= 4;  r += 4; }
+//         return r + tbl[hi & 0xF];
+//     } else {
+//         __u32 lo = x & 0xFFFFFFFF;
+//         if (lo >= (1<<16)) { lo >>= 16; r += 16; }
+//         if (lo >= (1<<8))  { lo >>= 8;  r += 8; }
+//         if (lo >= (1<<4))  { lo >>= 4;  r += 4; }
+//         return r + tbl[lo & 0xF];
+//     }
+// }
 /* ========================== CALCULATE SQRT(x) ========================== */
-static __always_inline __u16 bpf_sqrt(__u32 x)
-{
-    if (x == 0)
-        return 0;
+// static __always_inline __u16 bpf_sqrt(__u32 x)
+// {
+//     if (x == 0)
+//         return 0;
 
-    __u32 res = x;
-    __u32 prev = 0;
-    for (int i = 0; i < 4; i++) {
-        prev = res;
-        res = (res + x / res) >> 1;
-        if (res == prev)
-            break;
-    }
-    return res;
-}
+//     __u32 res = x;
+//     __u32 prev = 0;
+//     for (int i = 0; i < 4; i++) {
+//         prev = res;
+//         res = (res + x / res) >> 1;
+//         if (res == prev)
+//             break;
+//     }
+//     return res;
+// }
 /* ========================== STATS ========================== */
 static __always_inline int update_stats(struct flow_key *key, struct xdp_md *ctx)
 {
@@ -165,7 +165,7 @@ static __always_inline int update_stats(struct flow_key *key, struct xdp_md *ctx
 }
 
 /* ========================== DISTANCE ========================== */
-static __always_inline __u16 euclidean_distance(const data_point *a, const data_point *b)
+static __always_inline __u32 euclidean_distance(const data_point *a, const data_point *b)
 {
     __u64 fx = (a->total_bytes > b->total_bytes) ? a->total_bytes - b->total_bytes : b->total_bytes - a->total_bytes;
     __u64 fy = (a->total_pkts > b->total_pkts) ? a->total_pkts - b->total_pkts : b->total_pkts - a->total_pkts;
@@ -174,17 +174,23 @@ static __always_inline __u16 euclidean_distance(const data_point *a, const data_
     __u64 flow_dur_b = b->last_seen - b->start_ts;
     __u64 fw = (flow_dur_a > flow_dur_b) ? flow_dur_a - flow_dur_b : flow_dur_b - flow_dur_a;
 
-    __u8 dx = ilog2_u64(fx);
-    __u8 dy = ilog2_u64(fy);
-    __u8 dz = ilog2_u64(fz);
-    __u8 dw = ilog2_u64(fw);
+    // __u8 dx = ilog2_u64(fx);
+    // __u8 dy = ilog2_u64(fy);
+    // __u8 dz = ilog2_u64(fz);
+    // __u8 dw = ilog2_u64(fw);
+    __u8 dx = fx;
+    __u8 dy = fy;
+    __u8 dz = fz;
+    __u8 dw = fw;
 
     __u32 sum = dx*dx + dy*dy + dz*dz + dw*dw;
-    __u16 root = bpf_sqrt(sum);
+    return sum;
+    // __u16 root = bpf_sqrt(sum);
 
-    bpf_printk("euclidean_distance(): sum=%u root=%u\n", sum, root);
-    return (root > UINT16_MAX) ? UINT16_MAX : root;
+    // bpf_printk("euclidean_distance(): sum=%u root=%u\n", sum, root);
+    // return (root > UINT16_MAX) ? UINT16_MAX : root;
 }
+
 
 /* ========================== CALL BACK FOR KNN ========================== */
 static __always_inline int callback_knn(void *map, const void *key, void *value, void *ctx)
@@ -306,6 +312,7 @@ static int callback_krnn(void *map, const void *key, void *value, void *ctx)
     }
     return 0;
 }
+
 /* ========================== FIND KRNN ========================== */
 static __always_inline int find_krnn(const struct flow_key *target_key,
                                     const data_point *target)
@@ -357,67 +364,97 @@ static __always_inline int find_krnn(const struct flow_key *target_key,
 }
 
 /* ========================== UPDATE-SET HELPERS (MAP) ========================== */
-static __always_inline void clear_update_set(void)
+static __always_inline void clear_update_slot(__u32 count)
 {
 #pragma unroll
-    for (__u32 i = 0; i < UPDATE_MAX; i++) {
-        struct update_lrd_entry *slot = bpf_map_lookup_elem(&update_set_map, &i);
-        if (slot) {
+    for (__u32 i = 0; i < count; i++) {
+        if (i >= count) break;
+
+        __u32 key = i;
+        struct update_lrd_entry *slot = bpf_map_lookup_elem(&update_set_map, &key);
+        if (slot && slot->is_valid) {
             slot->is_valid = false;
             __builtin_memset(&slot->key, 0, sizeof(struct flow_key));
         }
     }
-    bpf_printk("clear_update_set(): reset all entries\n");
+    bpf_printk("clear_update_set(): reset %u entries\n", count);
 }
 
 /* ========================== IS KEY IN UPDATE SET ========================== */
-static __always_inline bool is_key_in_update_set_map(const struct flow_key *key, int count)
-{
-#pragma unroll
-    for (int i = 0; i < UPDATE_MAX; i++) {
-        if (i >= count)
-            break;
-        __u32 idx = i;
-        struct update_lrd_entry *slot = bpf_map_lookup_elem(&update_set_map, &idx);
-        if (!slot)
-            continue;
-        if (slot->is_valid &&
-            __builtin_memcmp(&slot->key, key, sizeof(struct flow_key)) == 0) {
-            bpf_printk("is_key_in_update_set(): key %u:%u exists at %d\n",
-                       key->src_ip, key->src_port, i);
-            return true;
-        }
-    }
-    return false;
-}
+// static __always_inline bool is_key_in_update_set_map(const struct flow_key *key, int count)
+// {
+// #pragma unroll
+//     for (int i = 0; i < UPDATE_MAX; i++) {
+//         if (i >= count)
+//             break;
+//         __u32 idx = i;
+//         struct update_lrd_entry *slot = bpf_map_lookup_elem(&update_set_map, &idx);
+//         if (!slot)
+//             continue;
+//         if (slot->is_valid &&
+//             __builtin_memcmp(&slot->key, key, sizeof(struct flow_key)) == 0) {
+//             bpf_printk("is_key_in_update_set(): key %u:%u exists at %d\n",
+//                        key->src_ip, key->src_port, i);
+//             return true;
+//         }
+//     }
+//     return false;
+// }
 
 /* ========================== ADD TO UPDATE SET ========================== */
+// static __always_inline int add_to_update_set_map(const struct flow_key *key,
+//                                                  int *count,
+//                                                  int max_size)
+// {
+//     if (*count >= max_size) {
+//         bpf_printk("add_to_update_set(): set full, cannot add key %u:%u\n",
+//                    key->src_ip, key->src_port);
+//         return -1;
+//     }
+
+//     if (is_key_in_update_set_map(key, *count)) {
+//         bpf_printk("add_to_update_set(): key %u:%u already in set\n",
+//                    key->src_ip, key->src_port);
+//         return 0;
+//     }
+
+//     __u32 idx = *count;
+//     struct update_lrd_entry *slot = bpf_map_lookup_elem(&update_set_map, &idx);
+//     if (!slot) {
+//         return -1;
+//     }
+//     __builtin_memcpy(&slot->key, key, sizeof(struct flow_key));
+//     slot->is_valid = true;
+
+//     bpf_printk("add_to_update_set(): added key %u:%u at index %u\n",
+//                key->src_ip, key->src_port, idx);
+
+//     (*count)++;
+//     return 1;
+// }
 static __always_inline int add_to_update_set_map(const struct flow_key *key,
                                                  int *count,
                                                  int max_size)
 {
-    if (*count >= max_size) {
-        bpf_printk("add_to_update_set(): set full, cannot add key %u:%u\n",
-                   key->src_ip, key->src_port);
+    if (*count >= max_size)
         return -1;
-    }
-
-    if (is_key_in_update_set_map(key, *count)) {
-        bpf_printk("add_to_update_set(): key %u:%u already in set\n",
-                   key->src_ip, key->src_port);
-        return 0;
-    }
 
     __u32 idx = *count;
     struct update_lrd_entry *slot = bpf_map_lookup_elem(&update_set_map, &idx);
-    if (!slot) {
-        return -1;
-    }
-    __builtin_memcpy(&slot->key, key, sizeof(struct flow_key));
-    slot->is_valid = true;
 
-    bpf_printk("add_to_update_set(): added key %u:%u at index %u\n",
-               key->src_ip, key->src_port, idx);
+    if (slot && slot->is_valid) {
+        if (__builtin_memcmp(&slot->key, key, sizeof(*key)) == 0) {
+            return 0; 
+        }
+
+        clear_update_slot(idx);
+    }
+
+    struct update_lrd_entry new_entry = {
+        .key = *key,
+        .is_valid = true,
+    };
+    bpf_map_update_elem(&update_set_map, &idx, &new_entry, BPF_ANY);
 
     (*count)++;
     return 1;
@@ -450,7 +487,6 @@ static int callback_knn_for_update(void *map, const void *key, void *value, void
     return 0;
 }
 
-/* ========================== COMPUTE UPDATE LRD SET ========================== */
 /* ========================== DETERMINE UPDATE LRD SET (dùng map) ========================== */
 static __always_inline int determine_update_lrd_set_map(const struct flow_key *target_key,
                                                         const data_point *target_dp)
@@ -459,7 +495,7 @@ static __always_inline int determine_update_lrd_set_map(const struct flow_key *t
     bpf_printk("determine_update_lrd_set(): start for target %u:%u\n",
                target_key->src_ip, target_key->src_port);
 
-    clear_update_set();
+    // clear_update_set_partial();
     add_to_update_set_map(target_key, &update_count, UPDATE_MAX);
 
     /* lấy danh sách KRNN của target */
@@ -527,8 +563,8 @@ static __always_inline void compute_lrd(data_point *dp, const struct flow_key *k
 /* ========================== UPDATE LRD FOR SET (map) ========================== */
 static __always_inline void update_lrd_for_set_map(int update_count)
 {
-#pragma unroll
-    for (int i = 0; i < UPDATE_MAX; i++) {
+#pragma clang loop unroll(disable)
+    for (int i = 0; i < update_count; i++) {
         if (i >= update_count)
             break;
 
@@ -587,8 +623,8 @@ static __always_inline void compute_lof(data_point *dp,
 /* ========================== UPDATE LOF FOR SET (map) ========================== */
 static __always_inline void update_lof_for_set_map(int update_count)
 {
-#pragma unroll
-    for (int i = 0; i < UPDATE_MAX; i++) {
+#pragma clang loop unroll(disable)
+    for (int i = 0; i < update_count; i++) {
         if (i >= update_count)
             break;
 
