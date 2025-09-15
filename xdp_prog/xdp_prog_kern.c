@@ -181,70 +181,70 @@ static __always_inline data_point *update_stats(struct flow_key *key,
     return dp;
 }
 
-/* ================= SAFE FEATURE ACCESS ================= */
-static __always_inline __u32 get_feature_safe(data_point *dp, __u32 feat_idx)
-{
-    if (feat_idx < MAX_FEATURES)
-        return dp->features[feat_idx];
-    return 0;
-}
+// /* ================= SAFE FEATURE ACCESS ================= */
+// static __always_inline __u32 get_feature_safe(data_point *dp, __u32 feat_idx)
+// {
+//     if (feat_idx < MAX_FEATURES)
+//         return dp->features[feat_idx];
+//     return 0;
+// }
 
-/* ================= PATH LENGTH ================= */
-static __always_inline int compute_path_length(data_point *dp, __u32 tree_idx)
-{
-    __u32 base = tree_idx * MAX_NODE_PER_TREE;
-    __u32 key  = base;
-    int depth  = 0;
+// /* ================= PATH LENGTH ================= */
+// static __always_inline int compute_path_length(data_point *dp, __u32 tree_idx)
+// {
+//     __u32 base = tree_idx * MAX_NODE_PER_TREE;
+//     __u32 key  = base;
+//     int depth  = 0;
 
-#pragma unroll
-    for (int i = 0; i < MAX_NODE_PER_TREE; i++) {
-        iTreeNode *node = bpf_map_lookup_elem(&xdp_isoforest_nodes, &key);
-        if (!node)
-            break;
+// #pragma unroll
+//     for (int i = 0; i < MAX_NODE_PER_TREE; i++) {
+//         iTreeNode *node = bpf_map_lookup_elem(&xdp_isoforest_nodes, &key);
+//         if (!node)
+//             break;
 
-        if (node->is_leaf) {
-            __u32 size = (node->num_points <= TRAINING_SET) ? node->num_points : TRAINING_SET;
-            __u32 c_key = size;
-            __u32 *c_scaled = bpf_map_lookup_elem(&xdp_isoforest_c, &c_key);
-            if (c_scaled) {
-                int c_int = (int)((*c_scaled + (SCALE/2)) / SCALE);
-                return depth + c_int;
-            }
-            return depth;
-        }
+//         if (node->is_leaf) {
+//             __u32 size = (node->num_points <= TRAINING_SET) ? node->num_points : TRAINING_SET;
+//             __u32 c_key = size;
+//             __u32 *c_scaled = bpf_map_lookup_elem(&xdp_isoforest_c, &c_key);
+//             if (c_scaled) {
+//                 int c_int = (int)((*c_scaled + (SCALE/2)) / SCALE);
+//                 return depth + c_int;
+//             }
+//             return depth;
+//         }
 
-        __u32 f_val = get_feature_safe(dp, node->feature_idx);
+//         __u32 f_val = get_feature_safe(dp, node->feature_idx);
 
-        if (f_val <= node->split_value) {
-            if (node->left_idx == NULL_IDX) break;
-            key = base + node->left_idx;
-        } else {
-            if (node->right_idx == NULL_IDX) break;
-            key = base + node->right_idx;
-        }
-        depth++;
-    }
-    return depth;
-}
+//         if (f_val <= node->split_value) {
+//             if (node->left_idx == NULL_IDX) break;
+//             key = base + node->left_idx;
+//         } else {
+//             if (node->right_idx == NULL_IDX) break;
+//             key = base + node->right_idx;
+//         }
+//         depth++;
+//     }
+//     return depth;
+// }
 
-/* ================= ANOMALY CHECK ================= */
-static __always_inline int is_anomaly(data_point *dp)
-{
-    __u32 key_params = 0;
-    struct forest_params *params = bpf_map_lookup_elem(&xdp_isoforest_params, &key_params);
-    if (!params) return 0;
+// /* ================= ANOMALY CHECK ================= */
+// static __always_inline int is_anomaly(data_point *dp)
+// {
+//     __u32 key_params = 0;
+//     struct forest_params *params = bpf_map_lookup_elem(&xdp_isoforest_params, &key_params);
+//     if (!params) return 0;
 
-    __u32 n_trees = params->n_trees;
-    if (n_trees == 0) return 0;
+//     __u32 n_trees = params->n_trees;
+//     if (n_trees == 0) return 0;
 
-    int total_depth = 0;
-    for (__u32 t = 0; t < n_trees && t < MAX_TREES; t++)
-        total_depth += compute_path_length(dp, t);
+//     int total_depth = 0;
+//     for (__u32 t = 0; t < n_trees && t < MAX_TREES; t++)
+//         total_depth += compute_path_length(dp, t);
 
-    __u32 avg_depth = ((__u32)total_depth * SCALE) / n_trees;
-    bpf_printk("AVG_DEPTH:%d", avg_depth);
-    return (avg_depth < params->threshold) ? 1 : 0;
-}
+//     __u32 avg_depth = ((__u32)total_depth * SCALE) / n_trees;
+//     bpf_printk("AVG_DEPTH:%d", avg_depth);
+//     return (avg_depth < params->threshold) ? 1 : 0;
+// }
 
 /* ================= XDP PROGRAM ================= */
 SEC("xdp")
@@ -260,13 +260,13 @@ int xdp_anomaly_detector(struct xdp_md *ctx)
     data_point *dp = update_stats(&key, ctx, 1);
     if (!dp) return XDP_PASS;
 
-    if (is_anomaly(dp)) {
-        dp->label = 1;
-        bpf_map_update_elem(&flow_dropped, &key, dp, BPF_ANY);
-    } else {
-        dp->label = 0;
-    }
-    bpf_map_update_elem(&xdp_flow_tracking, &key, dp, BPF_ANY);
+    // if (is_anomaly(dp)) {
+    //     dp->label = 1;
+    //     bpf_map_update_elem(&flow_dropped, &key, dp, BPF_ANY);
+    // } else {
+    //     dp->label = 0;
+    // }
+    // bpf_map_update_elem(&xdp_flow_tracking, &key, dp, BPF_ANY);
     return XDP_PASS;
 }
 

@@ -139,13 +139,13 @@ int build_tree(iTree *tree, data_point *points, __u32 num_points, int depth, int
 
     iTreeNode *node = &tree->nodes[node_idx];
     /* initialize node */
-    node->left_idx = NULL_IDX;
-    node->right_idx = NULL_IDX;
-    node->feature_idx = -1;
-    node->split_value = 0;
-    node->is_leaf = 1;
-    node->num_points = (int)num_points;
-    tree->num_nodes = (tree->num_nodes > (unsigned)(node_idx+1)) ? tree->num_nodes : (node_idx+1);
+    node->left_idx      = NULL_IDX;
+    node->right_idx     = NULL_IDX;
+    node->feature_idx   = -1;
+    node->split_value   = 0;
+    node->is_leaf       = 1;
+    node->num_points    = (int)num_points;
+    tree->num_nodes     = (tree->num_nodes > (unsigned)(node_idx+1)) ? tree->num_nodes : (node_idx+1);
 
     /* stop conditions */
     if (num_points <= 1 || depth >= (int)tree->max_depth) {
@@ -331,7 +331,7 @@ int save_forest_to_map(int map_fd_nodes, int map_fd_c, int map_fd_params, Isolat
     return 0;
 }
 
-
+/*==================== Path length & Anomaly ====================*/
 int path_length_point(iTreeNode *nodes, int node_idx, data_point *dp) {
     int length = 0;
     if (!nodes || node_idx < 0) return 0;
@@ -343,9 +343,23 @@ int path_length_point(iTreeNode *nodes, int node_idx, data_point *dp) {
         if (f_val <= node->split_value) node_idx = node->left_idx;
         else node_idx = node->right_idx;
         length++;
-        if (length > MAX_NODE_PER_TREE) break; /* safety */
+        if (length > MAX_NODE_PER_TREE) break;
     }
     return length;
+}
+
+static inline int is_anomaly_by_depth(IsolationForest *forest, data_point *dp, struct forest_params *params)
+{
+    if (!forest || !dp || !params) return 0;
+
+    double sum_path = 0.0;
+    for (__u32 t = 0; t < forest->n_trees; t++) {
+        sum_path += (double)path_length_point(forest->trees[t].nodes, 0, dp);
+    }
+
+    double avg_path = sum_path / (double)forest->n_trees;
+    double c_n = c_factor((int)params->sample_size);
+    return (avg_path * c_n >= (double)params->threshold / SCALE) ? 1 : 0;
 }
 
 double anomaly_score_point(IsolationForest *forest, data_point *dp, __u32 sample_size) {
@@ -360,26 +374,35 @@ double anomaly_score_point(IsolationForest *forest, data_point *dp, __u32 sample
     return pow(2.0, -avg_path / c_n);
 }
 
-int is_anomaly(double score, struct forest_params *params) {
-    if (!params) return 0;
-    return (score * SCALE >= (double)params->threshold) ? 1 : 0;
-}
+// int is_anomaly(double score, struct forest_params *params) {
+//     int path_len = path_length_point(...);
+//         return (path_len >= params->threshold); // threshold là depth   
+// }
 
-/*=============== Testing helper ===============*/
+/*==================== Testing helper ====================*/
 void test_forest_accuracy(IsolationForest *forest, data_point *test_data, int test_count, struct forest_params *params) {
-    if (!forest || !test_data || test_count <= 0) return;
+    if (!forest || !test_data || test_count <= 0 || !params) return;
+
     int correct = 0;
     for (int i = 0; i < test_count; i++) {
-        double score = anomaly_score_point(forest, &test_data[i], params->sample_size);
-        int pred = is_anomaly(score, params);
+        int pred = is_anomaly_by_depth(forest, &test_data[i], params);
         int actual = (test_data[i].label != 0) ? 1 : 0;
         if (pred == actual) correct++;
+
         if (i < 10) {
-            printf("Test %d: score=%.4f pred=%d actual=%d\n", i, score, pred, actual);
+            double avg_path = 0.0;
+            for (__u32 t = 0; t < forest->n_trees; t++) {
+                avg_path += (double)path_length_point(forest->trees[t].nodes, 0, &test_data[i]);
+            }
+            avg_path /= forest->n_trees;
+            printf("Test %d: avg_path=%.2f pred=%d actual=%d\n", i, avg_path, pred, actual);
         }
     }
-    printf("[INFO] Accuracy: %d/%d = %.2f%%\n", correct, test_count, (double)correct/test_count*100.0);
+
+    printf("[INFO] Accuracy: %d/%d = %.2f%%\n", correct, test_count, (double)correct / test_count * 100.0);
 }
+
+
 
 int cmp_double_desc(const void *a, const void *b) {
     double da = *(const double *)a;
@@ -448,6 +471,19 @@ int main(int argc, char **argv) {
     }
     printf("[INFO] Loaded %d training samples\n", train_count);
 
+    /* Load test data */
+    data_point test_dataset[MAX_TEST];
+    int test_count = read_csv_dataset("/home/dongtv/dtuan/training_isolation/processed/test_portmap_data.csv",
+                                       test_dataset, MAX_TEST);
+    if (test_count < 1) {
+        fprintf(stderr, "[ERROR] Testing dataset empty or invalid\n");
+        close(map_fd_nodes);
+        close(map_fd_params);
+        close(map_fd_c);
+        return EXIT_FAILURE;
+    }
+    printf("[INFO] Loaded %d testing samples\n", test_count);
+
     /* Initialize forest */
     IsolationForest forest;
     init_forest(&forest, MAX_TREES, MAX_DEPTH);
@@ -497,6 +533,7 @@ int main(int argc, char **argv) {
         close(map_fd_params);
         return EXIT_FAILURE;
     }
+    test_forest_accuracy(&forest, test_dataset, test_count, &params);
 
     printf("[INFO] Successfully updated BPF maps\n");
     printf("[INFO] Forest params: n_trees=%u, max_depth=%u, sample_size=%u, threshold=%u\n",

@@ -43,7 +43,7 @@ static void print_flow_csv(FILE *f, struct flow_key *key, data_point *dp) {
 
     fprintf(f, "%s,%u,%u,%u,%u,%u,%u,%d\n",
         ip_str,
-        key->src_port,
+        ntohs(key->src_port),
         dp->features[0],
         dp->features[1],
         dp->features[2],
