@@ -10,9 +10,9 @@
 #define MAX_FLOW_SAVED      100
 #define MAX_FEATURES        5
 #define MAX_POINTS_PER_MC   8
-#define MAX_MC              16
-#define MAX_PD              16
-#define MAX_RMC             16
+#define MAX_MC              8
+#define MAX_PD              8
+#define MAX_RMC             8
 #define MAX_K               4
 #define SUCCESS             1
 #define FAIL                0
@@ -21,6 +21,8 @@
 #define R3_2_SQ             3*R/2
 #define EVENT_CAPACITY      (MAX_FLOW_SAVED * MAX_K)
 #define MC_NONE             UINT32_MAX
+#define MC_MEMBER_IDX_OFFSET 12
+#define MEMBER_SIZE_BYTES 4
 /* Flow identification key */
 struct flow_key {
     __u32 src_ip;
