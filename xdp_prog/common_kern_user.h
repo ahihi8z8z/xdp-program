@@ -7,17 +7,20 @@
 #include <stdint.h>
 #include <math.h>
 #define SCALE               1000
-#define TRAINING_SET        3200
-#define MAX_FLOW_SAVED      1000
+#define MAX_FLOW_SAVED      100
 #define MAX_FEATURES        5
-#define MAX_TREES           100
-#define MAX_NODE_PER_TREE   128
-#define MAX_SAMPLE_PER_NODE 256
-#define NULL_IDX            -1
-#define MAX_TEST            300
-#define MAX_DEPTH           8
-#define CONTAMINATION       10
-
+#define MAX_POINTS_PER_MC   8
+#define MAX_MC              16
+#define MAX_PD              16
+#define MAX_RMC             16
+#define MAX_K               4
+#define SUCCESS             1
+#define FAIL                0
+#define R                   1000
+#define R2_HALF_SQ          (R/2)
+#define R3_2_SQ             3*R/2
+#define EVENT_CAPACITY      (MAX_FLOW_SAVED * MAX_K)
+#define MC_NONE             UINT32_MAX
 /* Flow identification key */
 struct flow_key {
     __u32 src_ip;
@@ -26,51 +29,47 @@ struct flow_key {
 } __attribute__((packed));
 
 typedef struct {
-    __u64 start_ts;             /* Timestamp of first packet        */
-    __u64 last_seen;            /* Timestamp of last packet         */
-    __u32 total_pkts;           /* Total packet count (Paccket/s)   */
-    __u32 total_bytes;          /* Total byte count (Bytes/s)       */
-    __u64 sum_IAT;              /* Sum of Inter-Arrival Times       */
-    __u32 sum_pkt_len;
-
-    __u64 flow_duration;        /* Duration of a flow       */
-    __u32 flow_IAT_mean;        /* Mean Inter-Arrival Time  */
-    __u32 flow_bytes_per_s;     /* Bytes/s                  */
-    __u32 flow_pkts_per_s;      /* Packets/s                */
-    __u32 pkt_len_mean;         /* Mean of Packet Length    */
-    __u32 features[MAX_FEATURES];
-    int   label;
+    /* METRIC TO COMPUTE FEATURES */
+    __u32   start_time;           /* Timestamp of first packet        */
+    __u32   last_seen;            /* Timestamp of last packet         */
+    __u32   total_pkts;           /* Total packet count (Paccket/s)   */
+    __u32   total_bytes;          /* Total byte count (Bytes/s)       */
+    __u64   sum_IAT;              /* Sum of Inter-Arrival Times       */
+    __u32   sum_pkt_len;
+    __u32   flow_duration;        /* Duration of a flow       */
+    __u32   flow_IAT_mean;        /* Mean Inter-Arrival Time  */
+    __u32   flow_bytes_per_s;     /* Bytes/s                  */
+    __u32   flow_pkts_per_s;      /* Packets/s                */
+    __u32   pkt_len_mean;         /* Mean of Packet Length    */
+    
+    __u32   features[MAX_FEATURES];
+    int     label;
 } data_point;
+ 
+typedef struct {
+    data_point d;
+    __u32      mc_id;
+    __u32      is_center;
+    __u32      is_in_cluster;
+    __u32      exps[MAX_K]; 
+    __u32      exps_size;
+    __u32      Rmc[MAX_RMC];
+    __u32      Rmc_size;
+    __u32      ev;
+    __u32      numberOfSucceeding;
+} MCO;
 
-typedef struct iTreeNode{
-    int left_idx;
-    int right_idx;
-    int feature_idx;
-    int split_value;             /* Have to SCALE */
-    int num_points;
-    int is_leaf;
-} iTreeNode;
-
-typedef struct iTree{
-    iTreeNode nodes[MAX_NODE_PER_TREE];
-    __u32     num_nodes;
-    __u32     max_depth;
-}iTree;
+typedef struct {
+    __u32   id;
+    __u32   center_idx;
+    __u32   size;
+    __u32   member_idx[MAX_POINTS_PER_MC];
+} MicroCluster;
 
 typedef struct{
-    iTree trees[MAX_TREES];
-    __u32 n_trees;
-    __u32 max_depth;
-    __u32 sample_size;
-}IsolationForest;
-
-struct forest_params {
-    __u32 n_trees;
-    __u32 sample_size;
-    __u32 threshold; /* integer threshold on avg path length */
-    __u32 max_depth;
-    __u32 contamination;
-};
+    __u32   time;
+    int     mco_id;
+} Event;
 
 /* XDP action definitions for compatibility */
 #ifndef XDP_ACTION_MAX
