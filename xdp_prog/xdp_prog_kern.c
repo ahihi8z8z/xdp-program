@@ -304,7 +304,7 @@ static __always_inline __u16 distance_data_vs_center(const data_point *a, MicroC
 static __always_inline __u32 count_pd_neighbors_in_R(const data_point *p, __u32 radius)
 {
     __u32 count = 0;
-
+    #pragma unroll MAX_PD
     for (__u32 i = 0; i < MAX_PD; i++) {
         MCO *mco = bpf_map_lookup_elem(&mco_states, &i);
         if (!mco) continue;
@@ -355,6 +355,7 @@ static __always_inline int is_new_mc_candidate(const data_point *p, __u32 k)
 
 static __always_inline int create_microcluster(__u32 point_idx)
 {
+    #pragma unroll MAX_MC
     for (__u32 i = 0; i < MAX_MC; i++) {
         MicroCluster *mc = bpf_map_lookup_elem(&micro_clusters, &i);
         if (!mc || mc->size > 0) continue;
@@ -592,38 +593,44 @@ static __always_inline int remove_point_from_mc(__u32 mc_id, __u32 point_idx)
 
 static __always_inline void remove_mco(__u32 point_idx)
 {
-    /* remove from PD_set if present */
+    __u32 zero = 0;
+
+    // Duyệt PD_set và xóa tất cả entry bằng point_idx
+    #pragma unroll MAX_PD
     for (__u32 i = 0; i < MAX_PD; i++) {
         __u32 *val = bpf_map_lookup_elem(&PD_set, &i);
-        if (!val) continue;
+        if (!val)
+            continue;
         if (*val == point_idx) {
-            __u32 zero = 0;
             bpf_map_update_elem(&PD_set, &i, &zero, BPF_ANY);
         }
     }
 
-    /* remove from micro cluster if member */
+    // Lấy MCO tương ứng và xóa khỏi micro-cluster nếu cần
     MCO *m = bpf_map_lookup_elem(&mco_states, &point_idx);
     if (m && m->mc_id != MC_NONE && m->mc_id < MAX_MC) {
         remove_point_from_mc(m->mc_id, point_idx);
     }
 
-    /* delete any event referencing this point (keyed by point_idx) */
+    // Xóa khỏi event queue và MCO map
     bpf_map_delete_elem(&event_queue, &point_idx);
-
-    /* finally delete mco state */
     bpf_map_delete_elem(&mco_states, &point_idx);
 }
 
 static __always_inline void process_expired_events(void)
 {
-    __u64 now_us = bpf_ktime_get_ns() / 1000ULL;
+    __u32 now_us = bpf_ktime_get_ns() / 1000ULL;
     Event ev = {};
-    while (event_extract_min(&ev) == SUCCESS) {
-        if ((__u64)ev.time > now_us) {
+    #pragma unroll EVENT_CAPACITY
+    for (int i = 0; i < EVENT_CAPACITY; i++) {
+        if (event_extract_min(&ev) != SUCCESS)
+            break;
+
+        if (ev.time > now_us) {
             event_insert(ev.mco_id, ev.time);
             break;
         }
+
         __u32 mco_idx = ev.mco_id;
         trim_expirations(mco_idx, now_us);
         remove_mco(mco_idx);
@@ -651,15 +658,14 @@ static __always_inline __u32 find_nearest_mc_id(const data_point *p, __u16 *out_
 
 static __always_inline int find_free_pd_slot(void)
 {
+    __u32 val = 0;   
+    #pragma unroll MAX_PD
     for (__u32 i = 0; i < MAX_PD; i++) {
-        __u32 *val = bpf_map_lookup_elem(&PD_set, &i);
-        if (!val) {
-            /* if lookup fails treat as free (but safer to write zero) */
-            __u32 zero = 0;
-            bpf_map_update_elem(&PD_set, &i, &zero, BPF_ANY);
+        if (bpf_map_lookup_elem(&PD_set, &i) == NULL) {
+            val = 0;
+            bpf_map_update_elem(&PD_set, &i, &val, BPF_ANY);
             return i;
         }
-        if (*val == 0) return i;
     }
     return FAIL;
 }
@@ -676,10 +682,8 @@ static __always_inline void process_new_point(__u32 point_idx)
         mco = bpf_map_lookup_elem(&mco_states, &point_idx);
         if (!mco) return;
     }
-
     process_expired_events();
-
-    /* Step 1: join nearest MC if close enough */
+    /* Step 2: join nearest MC if close enough */
     __u16 nearest_d = UINT16_MAX;
     __u32 nearest_mc = find_nearest_mc_id(p, &nearest_d);
     if (nearest_mc != MC_NONE && nearest_d <= ((__u16)(R/2))) {
@@ -694,21 +698,18 @@ static __always_inline void process_new_point(__u32 point_idx)
             return;
         }
     }
-
     /* Step 3: core point logic */
     if (is_core_point(p, MAX_K)) {
         if (is_new_mc_candidate(p, MAX_K)) {
             if (create_microcluster(point_idx) == SUCCESS) {
-                /* mark this MCO as new MC center */
                 mco->is_center = 1;
                 mco->is_in_cluster = 1;
-                mco->mc_id = point_idx; /* dùng id = index để sync */
+                mco->mc_id = point_idx;
                 bpf_map_update_elem(&mco_states, &point_idx, mco, BPF_ANY);
                 return;
             }
         }
     }
-
     /* Step 4: treat as PD (Potential Outlier) */
     int slot = find_free_pd_slot();
     if (slot != FAIL) {
