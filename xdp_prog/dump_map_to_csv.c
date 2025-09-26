@@ -119,7 +119,7 @@ int main(int argc, char **argv)
     }
 
     fprintf(f1, "Key,LeftIdx,RightIdx,Feature,SplitValue,Size,IsLeaf\n");
-    fprintf(f2, "SrcIP,SrcPort,feature1,feature2,feature3,feature4,Label\n");
+    fprintf(f2, "SrcIP,SrcPort,feature0,feature1,feature2,feature3,feature4,Label\n");
     dump_nodes_to_csv(map_fd, f1);
     dump_flow_map_to_csv(map_fd1, f2);
     fclose(f1);
