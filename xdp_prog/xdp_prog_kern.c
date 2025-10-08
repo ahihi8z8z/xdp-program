@@ -26,36 +26,13 @@ struct {
 } xdp_flow_tracking SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct flow_key);
-    __type(value, data_point);
-    __uint(max_entries, MAX_FLOW_SAVED);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
-} flow_dropped SEC(".maps");
-
-struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, MAX_TREES * MAX_NODE_PER_TREE);
+    __uint(max_entries, MAX_FEATURES + 1);
     __type(key, __u32);
-    __type(value, Node);
+    __type(value, __s32);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
-} xdp_randforest_nodes SEC(".maps");
+} svm_map SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, struct forest_params);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
-} xdp_randforest_params SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, __u32);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
-} flow_counter SEC(".maps");
 
 /* ================= PACKET PARSING ================= */
 static __always_inline int parse_packet_get_data(struct xdp_md *ctx,
@@ -162,77 +139,6 @@ static __always_inline data_point *update_stats(struct flow_key *key,
     return dp;
 }
 
-/* ================= TREE INFERENCE ================= */
-static __always_inline int predict_one_tree(__u32 root_idx, const data_point *dp)
-{
-    __u32 node_idx = root_idx;
-
-#pragma unroll MAX_TREE_DEPTH
-    for (int depth = 0; depth < MAX_TREE_DEPTH; depth++) {
-        if (node_idx >= (MAX_TREES * MAX_NODE_PER_TREE)) {
-            return 0; // out-of-bounds
-        }
-
-        Node *node = bpf_map_lookup_elem(&xdp_randforest_nodes, &node_idx);
-        if (!node)
-            return 0;
-
-        bpf_printk("TreeWalk: depth=%d node_idx=%u feat=%d split=%d is_leaf=%d\n",
-                   depth, node_idx, node->feature_idx, node->split_value, node->is_leaf);
-
-        if (node->is_leaf) {
-            bpf_printk("Leaf reached: node_idx=%u label=%d\n", node_idx,
-                       node->label);
-            return node->label;
-        }
-
-        __u32 f_idx = node->feature_idx;
-        if (f_idx >= MAX_FEATURES)
-            return 0;
-
-        __u32 f_val = dp->features[f_idx];
-        __s32 split = node->split_value;
-
-        __u32 next_idx;
-        if (f_val <= ( __u32)split) {
-            next_idx = node->left_idx;
-        } else {
-            next_idx = node->right_idx;
-        }
-
-        if (next_idx == (__u32)-1 || next_idx >= (MAX_TREES * MAX_NODE_PER_TREE)) {
-            return 0;
-        }
-
-        node_idx = next_idx;
-    }
-
-    return 0;
-}
-
-/* ================= RANDOM FOREST ================= */
-static __always_inline int predict_forest(data_point *dp)
-{
-    __u32 key = 0;
-    struct forest_params *params = bpf_map_lookup_elem(&xdp_randforest_params, &key);
-    if (!params || params->n_trees == 0)
-        return 0;
-
-    __u32 max_trees = (params->n_trees > MAX_TREES) ? MAX_TREES : params->n_trees;
-
-    int votes0 = 0, votes1 = 0;
-
-    #pragma unroll MAX_TREES
-    for (__u32 t = 0; t < max_trees; t++) {
-        __u32 root_key = t * MAX_NODE_PER_TREE;
-        int pred = predict_one_tree(root_key, dp);
-        if (pred == 0) votes0++;
-        else votes1++;
-    }
-
-    return (votes1 > votes0) ? 1 : 0;
-}
-
 /* ================= XDP ENTRY ================= */
 SEC("xdp")
 int xdp_anomaly_detector(struct xdp_md *ctx)
@@ -249,9 +155,6 @@ int xdp_anomaly_detector(struct xdp_md *ctx)
     data_point *dp = update_stats(&key, ctx);
     if (!dp)
         return XDP_PASS;
-
-    int pred = predict_forest(dp);
-    dp->label = pred ? 1 : 0;
 
     bpf_map_update_elem(&xdp_flow_tracking, &key, dp, BPF_ANY);
     return XDP_PASS;
