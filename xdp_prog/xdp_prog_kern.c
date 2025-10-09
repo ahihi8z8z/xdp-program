@@ -151,16 +151,36 @@ static __always_inline data_point *update_stats(struct flow_key *key,
 }
 
 /* ================= DISTANCE ================= */
+// static __always_inline fixed euclidean_distance(const data_point *a, const data_point *b)
+// {
+//     /* differences (absolute) */
+//     fixed dx = fixed_sub(a->flow_bytes_per_s, b->flow_bytes_per_s);
+//     fixed dy = fixed_sub(a->flow_pkts_per_s, b->flow_pkts_per_s);
+//     fixed dz = fixed_sub(a->pkts_len_mean, b->pkts_len_mean);
+//     /* for durations stored as uint -> convert to fixed then subtract */
+//     fixed da = uint_to_fixed(a->flow_duration);
+//     fixed db = uint_to_fixed(b->flow_duration);
+//     fixed dw = fixed_sub(da, db);
+//     fixed dh = fixed_sub(a->flow_IAT_mean, b->flow_IAT_mean);
+
+//     fixed sum = fixed_add(fixed_mul(dx, dx),
+//                  fixed_add(fixed_mul(dy, dy),
+//                  fixed_add(fixed_mul(dz, dz),
+//                  fixed_add(fixed_mul(dw, dw), fixed_mul(dh, dh)))));
+
+//     return fixed_sqrt(sum);
+// }
+
 static __always_inline fixed euclidean_distance(const data_point *a, const data_point *b)
 {
-    /* differences (absolute) */
     fixed dx = fixed_sub(a->flow_bytes_per_s, b->flow_bytes_per_s);
     fixed dy = fixed_sub(a->flow_pkts_per_s, b->flow_pkts_per_s);
     fixed dz = fixed_sub(a->pkts_len_mean, b->pkts_len_mean);
-    /* for durations stored as uint -> convert to fixed then subtract */
+
     fixed da = uint_to_fixed(a->flow_duration);
     fixed db = uint_to_fixed(b->flow_duration);
     fixed dw = fixed_sub(da, db);
+
     fixed dh = fixed_sub(a->flow_IAT_mean, b->flow_IAT_mean);
 
     fixed sum = fixed_add(fixed_mul(dx, dx),

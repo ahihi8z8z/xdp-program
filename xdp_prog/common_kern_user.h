@@ -85,24 +85,24 @@ static inline fixed fixed_sub(fixed a, fixed b)
     return (a >= b) ? (a - b) : 0;
 }
 
-static inline fixed fixed_mul(fixed a, fixed b)
+static __always_inline fixed fixed_mul(fixed a, fixed b)
 {
+    /* Q32.32 * Q32.32 = Q64.64, cần chia lại cho 2^32 */
     __u64 a_hi = a >> 32;
     __u64 a_lo = a & 0xFFFFFFFF;
     __u64 b_hi = b >> 32;
     __u64 b_lo = b & 0xFFFFFFFF;
 
-    /* Cross multiply (64-bit safe) */
-    __u64 mid = a_hi * b_lo + a_lo * b_hi;
-    __u64 hi  = a_hi * b_hi;
-    __u64 lo  = a_lo * b_lo;
+    /* Nhân chéo (giới hạn trong 64-bit, tránh tràn) */
+    __u64 hi = a_hi * b_hi;
+    __u64 mid1 = a_hi * b_lo;
+    __u64 mid2 = a_lo * b_hi;
+    __u64 lo = (a_lo * b_lo) >> 32;
 
-    /* Combine partial products */
-    __u64 res_hi = hi + (mid >> 32);
-    __u64 res_lo = (mid << 32) + (lo >> 32);
+    /* Tổng hợp lại — hiệu chỉnh theo FIXED_SHIFT */
+    __u64 result = (hi << 32) + mid1 + mid2 + lo;
 
-    /* Shift back to fixed scale */
-    return (res_hi << 32) | (res_lo >> 32);
+    return result;
 }
 
 static inline fixed fixed_div(fixed a, fixed b)
@@ -114,19 +114,18 @@ static inline fixed fixed_div(fixed a, fixed b)
     return (a / b) << FIXED_SHIFT ;
 }
 
-static __always_inline fixed fixed_log2(fixed x)
-{
-    if (x == 0) return 0;
+// static __always_inline fixed fixed_log2(fixed x)
+// {
+//     if (x == 0) return 0;
 
-    // count leading zeros (BPF helper understood by verifier)
-    __u64 leading = (__u64)__builtin_clzll(x);
-    int exp = 63 - leading - FIXED_SHIFT;
-    if (exp < 0) exp = 0;
+//     // count leading zeros (BPF helper understood by verifier)
+//     __u64 leading = (__u64)__builtin_clzll(x);
+//     int exp = 63 - leading - FIXED_SHIFT;
+//     if (exp < 0) exp = 0;
 
-    // Only return integer log part scaled
-    return (fixed)(((__u64)exp) << FIXED_SHIFT);
-}
-
+//     // Only return integer log part scaled
+//     return (fixed)(((__u64)exp) << FIXED_SHIFT);
+// }
 
 static __always_inline fixed fixed_sqrt(fixed x)
 {
