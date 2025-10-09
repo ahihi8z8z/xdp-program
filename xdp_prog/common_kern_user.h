@@ -10,8 +10,14 @@
 #define SCALEEEEEE          1000
 #define DATA_CAL_LOF        100
 #define MAX_FLOW_SAVED      200
-#define LOF_THRESHOLD       1.3 // Threshold accuracy cao nhất
-typedef int32_t fixed;
+#define LOF_THRESHOLD       1 // Threshold accuracy cao nhất
+
+#define FIXED_SHIFT         32
+#define FIXED_SCALE         (1ULL << FIXED_SHIFT)
+
+/*The high 32 bits store integer part*/
+/*The low 32 bits store the fractional part*/
+typedef __u64 fixed;
 
 /* Flow identification key */
 struct flow_key {
@@ -24,8 +30,12 @@ struct flow_key {
 
 struct knn_entry {
     struct flow_key key;   /* flow láng giềng */
-    __u16 distance;        /* khoảng cách tới neighbor */
+    fixed distance;        /* khoảng cách tới neighbor */
 };
+
+/*I think we only use fixed point for flow_duration, flow_pkts_per_s, flow_bytes_per_s
+pkts_len_mean, flow_IAT_mean, k_distance, reach_dist, lrd value, lof value.    
+*/
 
 /* Flow statistics and anomaly detection data */
 typedef struct {
@@ -36,21 +46,117 @@ typedef struct {
     __u32 total_pkts;           /* Total packet count (Paccket/s)*/
     __u32 total_bytes;          /* Total byte count (Bytes/s)*/
     __u64 sum_IAT;              /* Sum of Inter-Arrival Times */
-    __u32 flow_IAT_mean;        /* Mean Inter-Arrival Time */
+    fixed flow_IAT_mean;        /* Mean Inter-Arrival Time */
     __u64 flow_duration;
-    __u32 flow_pkts_per_s;
-    __u32 flow_bytes_per_s;
-    __u32 pkts_len_mean;
-    int   is_normal;
+    fixed flow_pkts_per_s;
+    fixed flow_bytes_per_s;
+    fixed pkts_len_mean;
+    __u8  is_normal;           /*Value of is_normal is only 0 or 1*/
 
-    __u16 k_distance;            /* k-distance value */
-    __u16 reach_dist[KNN];       /* Reachability distances to k neighbors */
-    __u16 lrd_value;             /* Local Reachability Density */
-    __u16 lof_value;             /* Local Outlier Factor score */
+    fixed k_distance;            /* k-distance value */
+    fixed reach_dist[KNN];       /* Reachability distances to k neighbors */
+    fixed lrd_value;             /* Local Reachability Density */
+    fixed lof_value;             /* Local Outlier Factor score */
 
     struct knn_entry knn[KNN];
 } data_point;
 
+static inline fixed uint_to_fixed(__u64 x){
+    return (fixed)(x << FIXED_SHIFT);
+}
+
+// static inline
+
+static inline __u64 fixed_to_uint(fixed x){
+    return x >> FIXED_SHIFT;
+}
+
+static inline fixed fixed_add(fixed a, fixed b)
+{
+    __u64 r = a + b;
+    if (r < a)
+        return (fixed)~(fixed)0ULL; 
+    return (fixed)r;
+}
+
+/*a > b*/
+static inline fixed fixed_sub(fixed a, fixed b)
+{
+    return (a >= b) ? (a - b) : 0;
+}
+
+static inline fixed fixed_mul(fixed a, fixed b)
+{
+    __u64 a_hi = a >> 32;
+    __u64 a_lo = a & 0xFFFFFFFF;
+    __u64 b_hi = b >> 32;
+    __u64 b_lo = b & 0xFFFFFFFF;
+
+    /* Cross multiply (64-bit safe) */
+    __u64 mid = a_hi * b_lo + a_lo * b_hi;
+    __u64 hi  = a_hi * b_hi;
+    __u64 lo  = a_lo * b_lo;
+
+    /* Combine partial products */
+    __u64 res_hi = hi + (mid >> 32);
+    __u64 res_lo = (mid << 32) + (lo >> 32);
+
+    /* Shift back to fixed scale */
+    return (res_hi << 32) | (res_lo >> 32);
+}
+
+static inline fixed fixed_div(fixed a, fixed b)
+{
+    if (b == 0)
+        return (fixed)~(fixed)0ULL;
+
+    /* scale numerator before division */
+    return (a / b) << FIXED_SHIFT ;
+}
+
+static __always_inline fixed fixed_log2(fixed x)
+{
+    if (x == 0) return 0;
+
+    // count leading zeros (BPF helper understood by verifier)
+    __u64 leading = (__u64)__builtin_clzll(x);
+    int exp = 63 - leading - FIXED_SHIFT;
+    if (exp < 0) exp = 0;
+
+    // Only return integer log part scaled
+    return (fixed)(((__u64)exp) << FIXED_SHIFT);
+}
+
+
+static __always_inline fixed fixed_sqrt(fixed x)
+{
+    if (x == 0) return 0;
+
+    __u64 n = x;
+    __u64 res = 0;
+    __u64 bit = 1ULL << 62; // highest power of four <= 2^64
+
+// #pragma unroll
+    for (int i = 0; i < 32; i++) {
+        if (bit > n)
+            bit >>= 2;
+        else
+            break;
+    }
+
+// #pragma unroll
+    for (int i = 0; i < 32; i++) {
+        if (n >= res + bit) {
+            n -= res + bit;
+            res = (res >> 1) + bit;
+        } else {
+            res >>= 1;
+        }
+        bit >>= 2;
+    }
+
+    return (fixed)res;
+}
 /* XDP action definitions for compatibility */
 #ifndef XDP_ACTION_MAX
 #define XDP_ACTION_MAX (XDP_REDIRECT + 1)

@@ -31,7 +31,7 @@ static void print_flow_key_csv(FILE *f, struct flow_key *key) {
 
 /* In ra data_point dưới dạng CSV */
 static void print_data_point_csv(FILE *f, data_point *dp) {
-    fprintf(f, ",%llu,%u,%u,%u,%u,%u",
+    fprintf(f, ",%llu,%llu,%llu,%llu,%llu,%u",
            dp->flow_duration,
            dp->flow_pkts_per_s,
            dp->flow_bytes_per_s,

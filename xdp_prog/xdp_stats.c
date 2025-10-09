@@ -49,7 +49,7 @@ static void print_flow_key(struct flow_key *key) {
 }
 
 static void print_data_point(data_point *dp) {
-    printf("%-12llu | %-12u | %-12u | %-12u | %-12u | %-12u | %-12u | %-12f | %-12f\n",
+    printf("%-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu\n",
            dp->flow_duration,
            dp->flow_pkts_per_s,
            dp->flow_bytes_per_s,
@@ -57,8 +57,8 @@ static void print_data_point(data_point *dp) {
            dp->pkts_len_mean,
            dp->k_distance,
            dp->reach_dist[0], // demo: in 1 reach_dist
-           (float)dp->lrd_value / SCALEEEEEE,
-           (float)dp->lof_value / SCALEEEEEE);
+           dp->lrd_value,
+           dp->lof_value);
 }
 
 // static void print_knn(data_point *dp) {
