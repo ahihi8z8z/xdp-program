@@ -49,50 +49,38 @@ static void print_flow_key(struct flow_key *key) {
 }
 
 static void print_data_point(data_point *dp) {
-    printf("%-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu | %-12llu\n",
-           dp->flow_duration,
-           dp->flow_pkts_per_s,
-           dp->flow_bytes_per_s,
-           dp->flow_IAT_mean,
-           dp->pkts_len_mean,
-           dp->k_distance,
+    printf("%-12u | %-12u |%-12u | %-12u |%-12u | %-12u | %-12u | %-12u | %-12lu | %-12lu\n",
+           dp->features[0],
+           dp->features[1],
+           dp->features[2],
+           dp->features[3],
+           dp->features[4],
            dp->reach_dist[0], // demo: in 1 reach_dist
            dp->lrd_value,
            dp->lof_value);
 }
-
-// static void print_knn(data_point *dp) {
-//     printf("   Neighbors: ");
-//     for (int k = 0; k < KNN; k++) {
-//         char ip[INET_ADDRSTRLEN];
-//         inet_ntop(AF_INET, &dp->knn[k].key.src_ip, ip, sizeof(ip));
-//         printf(" [%s:%u dist=%.3f]",
-//                ip, ntohs(dp->knn[k].key.src_port),
-//                (float)dp->knn[k].distance/SCALEEEEEE);
-//     }
-//     printf("\n");
-// }
 
 /*==================== SAFE LOG2 ====================*/
 static inline double safe_log2(double x) {
     return (x > 0) ? log2(x) : 0.0;
 }
 
-/*==================== DISTANCE (Euclidean with log) ====================*/
 static double distance (data_point *a, data_point *b){
-    double f1 = (double)a->total_bytes - (double)b->total_bytes;
+    double f1 = a->features[0] - b->features[0];
     double d1 = (f1 > 0) ? safe_log2(f1) : safe_log2(-f1);
 
-    double f2 = (double)a->total_pkts - (double)b->total_pkts;
+    double f2 = a->features[1] - b->features[1];
     double d2 = (f2 > 0) ? safe_log2(f2) : safe_log2(-f2);
 
-    double f3 = (double)a->flow_IAT_mean - (double)b->flow_IAT_mean;
+    double f3 = a->features[2] - b->features[2];
     double d3 = (f3 > 0) ? safe_log2(f3) : safe_log2(-f3);
 
-    double f4 = (double)(a->last_seen - a->start_ts) - (double)(b->last_seen - b->start_ts);
+    double f4 = a->features[3] - b->features[3];
     double d4 = (f4 > 0) ? safe_log2(f4) : safe_log2(-f4);
 
-    return sqrt(d1*d1 + d2*d2 + d3*d3 + d4*d4);
+    double f5 = a->features[4] - b->features[4];
+    double d5 = (f5 > 0) ? safe_log2(f5) : safe_log2(-f5);
+    return sqrt(d1*d1 + d2*d2 + d3*d3 + d4*d4 + d5*d5);
 }
 
 /*==================== COMPUTE DISTANCE MATRIX ====================*/
