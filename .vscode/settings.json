@@ -5,6 +5,7 @@
         "array": "c",
         "string_view": "c",
         "initializer_list": "c",
-        "common_user_bpf_xdp.h": "c"
+        "common_user_bpf_xdp.h": "c",
+        "cmath": "c"
     }
 }

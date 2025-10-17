@@ -7,24 +7,26 @@
 #include <stdint.h>
 #include <math.h>
 /*Config numbers of total data_points to training*/
-#define TRAINING_SET         3200
+#define TRAINING_SET         10000
 /*Config numbers of flow to save to map xdp_flow_tracking or flow_dropped*/
-#define MAX_FLOW_SAVED       300
+#define MAX_FLOW_SAVED       1000
 /*Don't configure here*/
-#define NULL_IDX             -1
 #define MAX_FEATURES         5
 #define SCALE                1000
 #define MAP_SIZE             (2*MAX_FEATURES + 2)
 /*Define for fixed point*/
 #define FIXED_SHIFT          24
 #define FIXED_SCALE          (1 << FIXED_SHIFT)
-typedef __u32                fixed;
+#define OUT_NEURONS          2
+typedef __s32                fixed;
 
 /* Flow identification key */
 struct flow_key {
     __u32 src_ip;
     __u16 src_port;
-    __u16 padding;
+    __u32 dst_ip;
+    __u16 dst_port;
+    __u8  proto;
 } __attribute__((packed));
 
 typedef struct {
@@ -52,28 +54,30 @@ typedef struct mlp_params{
     fixed max_vals[MAX_FEATURES];
 } mlp_params;
 
-/* Convert float (as double in user space) to fixed-point */
+/* Convert float/double to fixed (signed) */
 static __always_inline fixed fixed_from_float(double value)
 {
-    return (__u32)(value * (double)FIXED_SCALE);
+    double scaled = value * (double)FIXED_SCALE;
+    if (scaled > (double)INT32_MAX) scaled = (double)INT32_MAX;
+    if (scaled < (double)INT32_MIN) scaled = (double)INT32_MIN;
+    return (fixed)lrint(scaled);
 }
-
 /* Convert fixed-point to float */
 static __always_inline float fixed_to_float(fixed value)
 {
-    return (float)value / (float)FIXED_SCALE;
+    return ((float)value) / (float)FIXED_SCALE;
 }
 
-/* Convert unsigned integer to fixed-point */
-static __always_inline fixed fixed_from_uint(__u32 value)
+/* Convert signed integer to fixed-point */
+static __always_inline fixed fixed_from_int(int value)
 {
-    return value << FIXED_SHIFT;
+    return (fixed)(value << FIXED_SHIFT);
 }
 
 /* Convert fixed-point to integer (truncate fractional) */
-static __always_inline __u32 fixed_to_uint(fixed value)
+static __always_inline int fixed_to_int(fixed value)
 {
-    return value >> FIXED_SHIFT;
+    return (int)(value >> FIXED_SHIFT);
 }
 
 /* Add (safe for unsigned overflow wraparound) */
@@ -91,18 +95,28 @@ static __always_inline fixed fixed_sub(fixed a, fixed b)
 /* Multiply (with scale correction) */
 static __always_inline fixed fixed_mul(fixed a, fixed b)
 {
-    /* Cast to 64-bit temporarily to avoid overflow before shift */
-    unsigned long long temp = (unsigned long long)a * (unsigned long long)b;
+    long long temp = (long long)a * (long long)b;
     return (fixed)(temp >> FIXED_SHIFT);
 }
+
 
 /* Fixed-point division */
 static __always_inline fixed fixed_div(fixed a, fixed b)
 {
     if (b == 0)
         return 0;
-    unsigned long long temp = ((unsigned long long)a << FIXED_SHIFT);
-    return (fixed)(temp / b);
+
+    /* Nếu cả 2 số đều dương hoặc âm, kết quả dương; ngược lại âm */
+    int neg = ((a < 0) ^ (b < 0));
+
+    /* Dùng trị tuyệt đối để chia */
+    unsigned long long ua = (a < 0) ? -(long long)a : (long long)a;
+    unsigned long long ub = (b < 0) ? -(long long)b : (long long)b;
+
+    unsigned long long temp = (ua << FIXED_SHIFT) / ub;
+    fixed res = (fixed)temp;
+
+    return neg ? -res : res;
 }
 
 /* Square root using integer Newton's method */
@@ -113,23 +127,24 @@ static __always_inline fixed fixed_sqrt(fixed value)
 
     fixed x = value;
     for (int i = 0; i < 8; i++) {
-        x = fixed_div(fixed_add(x, fixed_div(value, x)), fixed_from_uint(2));
+        x = fixed_div(fixed_add(x, fixed_div(value, x)), fixed_from_int(2));
     }
     return x;
 }
 /* Fixed-point absolute value */
-static inline fixed fixed_abs(fixed value)
+static __always_inline fixed fixed_abs(fixed value)
 {
     return (value < 0) ? -value : value;
 }
 
 /* Compare two fixed-point values */
-static inline int fixed_compare(fixed a, fixed b)
+static __always_inline int fixed_compare(fixed a, fixed b)
 {
     if (a < b) return -1;
     if (a > b) return 1;
     return 0;
 }
+
 
 /* Fixed-point minimum */
 static inline fixed fixed_min(fixed a, fixed b)
@@ -150,14 +165,19 @@ static __always_inline fixed fixed_log2(__u32 x)
 
     __u32 int_part = 0;
     __u32 tmp = x;
-    while (tmp >>= 1)
-        int_part++;
 
-    __u32 base = 1 << int_part;
+    // #pragma unroll
+    for (int i = 0; i < 32; i++) {
+        if (tmp >>= 1)
+            int_part++;
+        else
+            break;
+    }
+
+    __u32 base = 1U << int_part;
     __u32 remainder = x - base;
-
-    __u32 frac = (remainder << FIXED_SHIFT) / base;
-    return (int_part << FIXED_SHIFT) | frac;
+    fixed frac = ((__s64)remainder << FIXED_SHIFT) / base;
+    return ((fixed)int_part << FIXED_SHIFT) | frac;
 }
 
 /* XDP action definitions for compatibility */
