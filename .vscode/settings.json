@@ -4,6 +4,7 @@
         "cstdint": "c",
         "array": "c",
         "string_view": "c",
-        "initializer_list": "c"
+        "initializer_list": "c",
+        "common_user_bpf_xdp.h": "c"
     }
 }

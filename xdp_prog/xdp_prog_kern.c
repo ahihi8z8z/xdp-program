@@ -27,12 +27,19 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, MAX_FEATURES + 1);
+    __uint(max_entries, 2 * MAX_FEATURES + 2);
     __type(key, __u32);
-    __type(value, __s32);
+    __type(value, fixed);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
-} svm_map SEC(".maps");
+} mlp_maps SEC(".maps");
 
+struct{
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, mlp_params);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} xdp_mlp_params SEC(".maps");
 
 /* ================= PACKET PARSING ================= */
 static __always_inline int parse_packet_get_data(struct xdp_md *ctx,
@@ -77,14 +84,42 @@ static __always_inline int parse_packet_get_data(struct xdp_md *ctx,
     return 0;
 }
 
-/* ================= FEATURE UPDATE ================= */
-static __always_inline void update_feature_in_datapoint(data_point *dp)
+static __always_inline void apply_min_max_scale(data_point *dp, const mlp_params *params)
 {
-    dp->features[0] = (__u32)dp->flow_duration;
-    dp->features[1] = dp->flow_pkts_per_s;
-    dp->features[2] = dp->pkt_len_mean;
-    dp->features[3] = dp->flow_IAT_mean;
-    dp->features[4] = dp->flow_bytes_per_s;
+    if (!params)
+        return;
+
+// #pragma unroll
+    for (int i = 0; i < MAX_FEATURES; i++) {
+        fixed x = dp->features[i];
+        fixed minv = params->min_vals[i];
+        fixed maxv = params->max_vals[i];
+        fixed range = maxv - minv;
+
+        if (range <= 0)
+            dp->features[i] = 0;
+        else
+            dp->features[i] = fixed_div((x - minv), range);
+    }
+}
+
+/* ================= FEATURE UPDATE ================= */
+static __always_inline void update_feature(data_point *dp, const mlp_params *params)
+{
+    if (dp->total_pkts > 1) {
+        fixed flow_duration = fixed_log2(dp->flow_duration);
+        __u64 mean_iat_us = dp->sum_IAT / (dp->total_pkts - 1);
+
+        dp->features[0] = flow_duration;
+        dp->features[1] = fixed_log2(dp->total_pkts * 1000000) - flow_duration;
+        dp->features[2] = fixed_log2(dp->total_bytes * 1000000) - flow_duration;
+        dp->features[3] = fixed_log2(mean_iat_us); // Log2(Mean IAT)
+        dp->features[4] = fixed_log2(dp->total_bytes) - fixed_log2(dp->total_pkts);
+
+        /* scale only if params provided */
+        if (params)
+            apply_min_max_scale(dp, params);
+    }
 }
 
 /* ================= FLOW STATS ================= */
@@ -105,12 +140,7 @@ static __always_inline data_point *update_stats(struct flow_key *key,
 
         if (bpf_map_update_elem(&xdp_flow_tracking, key, &zero, BPF_ANY) != 0)
             return NULL;
-
-        __u32 idx = 0;
-        __u32 *cnt = bpf_map_lookup_elem(&flow_counter, &idx);
-        if (cnt)
-            __sync_fetch_and_add(cnt, 1);
-
+            
         return bpf_map_lookup_elem(&xdp_flow_tracking, key);
     }
 
@@ -123,21 +153,20 @@ static __always_inline data_point *update_stats(struct flow_key *key,
         dp->sum_IAT += iat_ns;
 
     dp->last_seen = ts_us;
-
-    if (dp->total_pkts > 1) {
-        dp->flow_IAT_mean = dp->sum_IAT / (dp->total_pkts - 1);
-        dp->pkt_len_mean  = dp->total_bytes / dp->total_pkts;
-    }
-
     dp->flow_duration = dp->last_seen - dp->start_ts;
-    if (dp->flow_duration > 0) {
-        dp->flow_bytes_per_s = (dp->total_bytes * 1000000ULL) / dp->flow_duration;
-        dp->flow_pkts_per_s  = (dp->total_pkts  * 1000000ULL) / dp->flow_duration;
+    __u32 pkey = 0;
+    mlp_params *params = bpf_map_lookup_elem(&xdp_mlp_params, &pkey);
+    if (params) {
+        /* verifier now knows params != NULL on the true branch */
+        update_feature(dp, params);
+    } else {
+        /* No params: still update features without scaling (or early return) */
+        update_feature(dp, NULL);
     }
-
-    update_feature_in_datapoint(dp);
     return dp;
 }
+
+// static __always_inline int inference_mlp(data_point *dp, mlp_params *params)
 
 /* ================= XDP ENTRY ================= */
 SEC("xdp")
