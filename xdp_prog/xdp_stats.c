@@ -33,99 +33,99 @@ static const struct option_wrapper long_options[] = {
 
 const char *pin_basedir = "/sys/fs/bpf";
 
-// void min_max_scale_fixed(data_point *dataset, int n_samples, int n_feature, mlp_params *params){
-//     fixed min_vals[n_feature];
-//     fixed max_vals[n_feature];
+void min_max_scale_fixed(data_point *dataset, int n_samples, int n_feature, mlp_params *params){
+    fixed min_vals[n_feature];
+    fixed max_vals[n_feature];
 
-//     for(int j = 0; j < n_feature; j++){
-//         min_vals[j] = INT32_MAX;
-//         max_vals[j] = INT32_MIN;
-//     }
+    for(int j = 0; j < n_feature; j++){
+        min_vals[j] = INT32_MAX;
+        max_vals[j] = INT32_MIN;
+    }
 
-//     for (int i = 0; i < n_samples; i++) {
-//         for (int j = 0; j < n_feature; j++) {
-//             fixed val = dataset[i].features[j];
-//             if (val < min_vals[j]) min_vals[j] = val;
-//             if (val > max_vals[j]) max_vals[j] = val;
-//         }
-//     }
+    for (int i = 0; i < n_samples; i++) {
+        for (int j = 0; j < n_feature; j++) {
+            fixed val = dataset[i].features[j];
+            if (val < min_vals[j]) min_vals[j] = val;
+            if (val > max_vals[j]) max_vals[j] = val;
+        }
+    }
 
-//     for(int i = 0; i < n_feature; i++){
-//         params->min_vals[i] = min_vals[i];
-//         params->max_vals[i] = max_vals[i];
-//     }
+    for(int i = 0; i < n_feature; i++){
+        params->min_vals[i] = min_vals[i];
+        params->max_vals[i] = max_vals[i];
+    }
 
-//     for (int i = 0; i < n_samples; i++) {
-//         for (int j = 0; j < n_feature; j++) {
-//             __u32 val = dataset[i].features[j];
-//             __u32 range = max_vals[j] - min_vals[j];
-//             if (range > 0) {
-//                 // scaled = (val - min) / range
-//                 // => fixed = ((val - min) << 24) / range
-//                 fixed scaled = fixed_div(fixed_sub(val, min_vals[j]), range);
-//                 // fixed scaled = ((__s64)(val - min_vals[j]) << 24) / range;
-//                 dataset[i].features[j] = scaled;
-//             } else {
-//                 dataset[i].features[j] = 0;
-//             }
-//         }
-//     }
-// }
+    for (int i = 0; i < n_samples; i++) {
+        for (int j = 0; j < n_feature; j++) {
+            __u32 val = dataset[i].features[j];
+            __u32 range = max_vals[j] - min_vals[j];
+            if (range > 0) {
+                // scaled = (val - min) / range
+                // => fixed = ((val - min) << 24) / range
+                fixed scaled = fixed_div(fixed_sub(val, min_vals[j]), range);
+                // fixed scaled = ((__s64)(val - min_vals[j]) << 24) / range;
+                dataset[i].features[j] = scaled;
+            } else {
+                dataset[i].features[j] = 0;
+            }
+        }
+    }
+}
 
-// /*==================== CSV Reading ====================*/
-// int read_csv_dataset1(const char *filename, data_point *dataset, int max_rows, mlp_params *params) {
-//     FILE *f = fopen(filename, "r");
-//     if (!f) {
-//         fprintf(stderr, "[ERROR] Cannot open file: %s\n", filename);
-//         return -1;
-//     }
+/*==================== CSV Reading ====================*/
+int read_csv_dataset1(const char *filename, data_point *dataset, int max_rows, mlp_params *params) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        fprintf(stderr, "[ERROR] Cannot open file: %s\n", filename);
+        return -1;
+    }
 
-//     char line[1024];
-//     int count = 0;
+    char line[1024];
+    int count = 0;
 
-//     /* Skip header */
-//     if (!fgets(line, sizeof(line), f)) {
-//         fclose(f);
-//         return 0;
-//     }
+    /* Skip header */
+    if (!fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return 0;
+    }
 
-//     while (fgets(line, sizeof(line), f) && count < max_rows) {
-//         data_point dp = {0};
-//         int idx;
-//         int src_port, dst_port;
-//         char src_ip[64];
-//         char dst_ip[64];
-//         double feature0, feature1, feature2, feature3, feature4;
-//         int un_label, proto;
-//         char label_str[32];  // label as string
+    while (fgets(line, sizeof(line), f) && count < max_rows) {
+        data_point dp = {0};
+        int idx;
+        int src_port, dst_port;
+        char src_ip[64];
+        char dst_ip[64];
+        double feature0, feature1, feature2, feature3, feature4;
+        int un_label, proto;
+        char label_str[32];  // label as string
         
-//         int n = sscanf(line,
-//                        "%d,%63[^,],%d,%63[^,],%d,%d,%lf,%lf,%lf,%lf,%lf,%d,%31s",
-//                        &idx, src_ip, &src_port, dst_ip, &dst_port, &proto,
-//                        &feature0, &feature1, &feature2,
-//                        &feature3, &feature4, &un_label, label_str);
+        int n = sscanf(line,
+                       "%d,%63[^,],%d,%63[^,],%d,%d,%lf,%lf,%lf,%lf,%lf,%d,%31s",
+                       &idx, src_ip, &src_port, dst_ip, &dst_port, &proto,
+                       &feature0, &feature1, &feature2,
+                       &feature3, &feature4, &un_label, label_str);
 
-//         if (n != 13) continue;
+        if (n != 13) continue;
 
-//         /* Copy features */
-//         dp.features[0] = fixed_from_float(log2(feature0 + 1.0));
-//         dp.features[1] = fixed_from_float(log2(feature1 + 1.0));
-//         dp.features[2] = fixed_from_float(log2(feature2 + 1.0));
-//         dp.features[3] = fixed_from_float(log2(feature3 + 1.0));
-//         dp.features[4] = fixed_from_float(log2(feature4 + 1.0));
+        /* Copy features */
+        dp.features[0] = fixed_from_float(log2(feature0 + 1.0));
+        dp.features[1] = fixed_from_float(log2(feature1 + 1.0));
+        dp.features[2] = fixed_from_float(log2(feature2 + 1.0));
+        dp.features[3] = fixed_from_float(log2(feature3 + 1.0));
+        dp.features[4] = fixed_from_float(log2(feature4 + 1.0));
         
-//         /* Convert label string to int: BENIGN=1, else=0 */
-//         if (strcmp(label_str, "BENIGN") == 0)
-//             dp.label = 1;
-//         else
-//             dp.label = 0;
+        /* Convert label string to int: BENIGN=1, else=0 */
+        if (strcmp(label_str, "BENIGN") == 0)
+            dp.label = 1;
+        else
+            dp.label = 0;
 
-//         dataset[count++] = dp;
-//     }
-//     fclose(f);
-//     min_max_scale_fixed(dataset, count, MAX_FEATURES, params);
-//     return count;
-// }
+        dataset[count++] = dp;
+    }
+    fclose(f);
+    min_max_scale_fixed(dataset, count, MAX_FEATURES, params);
+    return count;
+}
 
 int read_neural_to_map(const char *filename){
     FILE *fp = fopen(filename, "r");

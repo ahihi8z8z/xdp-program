@@ -110,41 +110,41 @@ static __always_inline void apply_min_max_scale(data_point *dp, const mlp_params
 }
 
 /* ================= FEATURE UPDATE ================= */
-// static __always_inline void update_feature(data_point *dp, const mlp_params *params)
-// {
-//     if (dp->total_pkts > 1) {
-//         fixed flow_duration = fixed_log2(dp->flow_duration);
-//         __u64 mean_iat_us = dp->sum_IAT / (dp->total_pkts - 1);
+static __always_inline void update_feature(data_point *dp, const mlp_params *params)
+{
+    if (dp->total_pkts > 1) {
+        fixed flow_duration = fixed_log2(dp->flow_duration);
+        __u64 mean_iat_us = dp->sum_IAT / (dp->total_pkts - 1);
 
-//         dp->features[0] = flow_duration;
-//         dp->features[1] = fixed_log2(dp->total_pkts * 1000000) - flow_duration;
-//         dp->features[2] = fixed_log2(dp->total_bytes * 1000000) - flow_duration;
-//         dp->features[3] = fixed_log2(mean_iat_us); // Log2(Mean IAT)
-//         dp->features[4] = fixed_log2(dp->total_bytes) - fixed_log2(dp->total_pkts);
+        dp->features[0] = flow_duration;
+        dp->features[1] = fixed_log2(dp->total_pkts * 1000000) - flow_duration;
+        dp->features[2] = fixed_log2(dp->total_bytes * 1000000) - flow_duration;
+        dp->features[3] = fixed_log2(mean_iat_us); // Log2(Mean IAT)
+        dp->features[4] = fixed_log2(dp->total_bytes) - fixed_log2(dp->total_pkts);
 
-//         /* scale only if params provided */
-//         if (params)
-//             apply_min_max_scale(dp, params);
-//     }
-// }
-
-static __always_inline void update_feature(data_point *dp, const mlp_params *params){
-    if(dp->total_pkts > 1){
-        __u32 dur       = dp->flow_duration + 1;
-        __u32 pkts      = dp->total_pkts + 1;
-        __u32 bytes     = dp->total_bytes + 1;
-        __u32 mean_iat  = dp->sum_IAT / (dp->total_pkts - 1) + 1;
-
-        dp->features[0] = fixed_log2(dur);
-        dp->features[1] = fixed_log2(pkts * 1000000);
-        dp->features[2] = fixed_log2(bytes * 1000000);
-        dp->features[3] = fixed_log2(mean_iat);
-        dp->features[4] = fixed_log2(bytes / pkts + 1);
-
+        /* scale only if params provided */
         if (params)
             apply_min_max_scale(dp, params);
     }
 }
+
+// static __always_inline void update_feature(data_point *dp, const mlp_params *params){
+//     if(dp->total_pkts > 1){
+//         __u32 dur       = dp->flow_duration + 1;
+//         __u32 pkts      = dp->total_pkts + 1;
+//         __u32 bytes     = dp->total_bytes + 1;
+//         __u32 mean_iat  = dp->sum_IAT / (dp->total_pkts - 1) + 1;
+
+//         dp->features[0] = fixed_log2(dur);
+//         dp->features[1] = fixed_log2(pkts * 1000000);
+//         dp->features[2] = fixed_log2(bytes * 1000000);
+//         dp->features[3] = fixed_log2(mean_iat);
+//         dp->features[4] = fixed_log2(bytes / pkts + 1);
+
+//         if (params)
+//             apply_min_max_scale(dp, params);
+//     }
+// }
 
 /* ================= FLOW STATS ================= */
 static __always_inline data_point *update_stats(struct flow_key *key,
